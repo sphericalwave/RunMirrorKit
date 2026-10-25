@@ -1,0 +1,77 @@
+//
+//  WatchRunMessageTests.swift
+//  RunMirrorKitTests
+//
+//  What crosses between phone and watch survives the trip, the watch counts
+//  down from the state alone, and the save rule tells an app's own workouts
+//  from everyone else's.
+//
+
+import XCTest
+@testable import RunMirrorKit
+
+final class WatchRunMessageTests: XCTestCase {
+    private let now = Date(timeIntervalSince1970: 1_800_000_000)
+
+    private func state(endsAt: Date?, paused: Int? = nil) -> WatchRunState {
+        WatchRunState(runID: "r", status: .running, planName: "evening", exercise: "seiza", side: "",
+                      isResting: false, restLabel: "", next: "kiza", nextIsNewRound: false,
+                      round: 1, rounds: 2, durationSec: 40, endsAt: endsAt, pausedRemainingSec: paused,
+                      segment: 3, saveToHealth: true, sentAt: now)
+    }
+
+    func testStateRoundTrips() {
+        let s = state(endsAt: now.addingTimeInterval(30))
+        XCTAssertEqual(WatchRunMessage.state(in: WatchRunMessage.encode(s)), s)
+        XCTAssertTrue(WatchRunMessage.isRunMessage(WatchRunMessage.encode(s)))
+    }
+
+    func testCommandsHeartRateAndNotesRoundTrip() {
+        XCTAssertEqual(WatchRunMessage.command(in: WatchRunMessage.encode(WatchRunCommand.back)), .back)
+        XCTAssertEqual(WatchRunMessage.heartRate(in: WatchRunMessage.encode(heartRate: 64)), 64)
+        let note = WatchWorkoutNote(runID: "r", text: "not saved")
+        XCTAssertEqual(WatchRunMessage.workoutNote(in: WatchRunMessage.encode(note)), note)
+        XCTAssertNil(WatchRunMessage.state(in: WatchRunMessage.encode(heartRate: 64)))
+    }
+
+    func testOtherFeaturesMessagesArentTheRuns() {
+        XCTAssertFalse(WatchRunMessage.isRunMessage(["sitActive": true]))
+        XCTAssertFalse(WatchRunMessage.isRunMessage(["checkIn": "tap", "t": 1.0]))
+        XCTAssertFalse(WatchRunMessage.isRunMessage(["streaming": true]))
+    }
+
+    func testCountsDownFromEndsAtRoundingUp() {
+        let s = state(endsAt: now.addingTimeInterval(30))
+        XCTAssertFalse(s.isPaused)
+        XCTAssertEqual(s.remainingSec(at: now), 30)
+        XCTAssertEqual(s.remainingSec(at: now.addingTimeInterval(12.5)), 18)
+        XCTAssertEqual(s.remainingSec(at: now.addingTimeInterval(99)), 0)
+    }
+
+    func testPausedHoldsWhatWasLeft() {
+        let s = state(endsAt: nil, paused: 12)
+        XCTAssertTrue(s.isPaused)
+        XCTAssertEqual(s.remainingSec(at: now.addingTimeInterval(500)), 12)
+    }
+
+    func testOwnSourceAppIsTheAsker() {
+        typealias W = WatchWorkoutSaveRule.OtherWorkout
+        XCTAssertEqual(W(start: now, end: now, bundleID: "x", sourceApp: "meditate", ownSourceApp: "meditate").source,
+                       .ownApp)
+        XCTAssertEqual(W(start: now, end: now, bundleID: "x", sourceApp: "bioMechanic", ownSourceApp: "meditate").source,
+                       .other)
+        XCTAssertEqual(W(start: now, end: now, bundleID: "com.sphericalwave.jiujitsu.flow", sourceApp: nil,
+                         ownSourceApp: "meditate").source, .flow)
+    }
+
+    func testOwnWorkoutDoesntBlockSaving() {
+        let end = now.addingTimeInterval(600)
+        let readings = stride(from: 0.0, to: 600, by: 5).map { now.addingTimeInterval($0) }
+        let mine = WatchWorkoutSaveRule.OtherWorkout(start: now, end: end, source: .ownApp)
+        XCTAssertEqual(WatchWorkoutSaveRule.decide(enabled: true, start: now, end: end, activeDuration: 600,
+                                                   heartRateTimes: readings, others: [mine]), .save)
+        let theirs = WatchWorkoutSaveRule.OtherWorkout(start: now, end: end, source: .other)
+        XCTAssertEqual(WatchWorkoutSaveRule.decide(enabled: true, start: now, end: end, activeDuration: 600,
+                                                   heartRateTimes: readings, others: [theirs]), .recordedElsewhere)
+    }
+}
