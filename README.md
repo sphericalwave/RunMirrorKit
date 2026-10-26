@@ -9,8 +9,8 @@ A guided run (timed holds, rounds) on the iPhone, mirrored on the Apple Watch, w
   - `WatchWorkoutSaveRule`: when the watch keeps its workout in Health.
   - `RunInterruptions`: a call pauses a run and resumes it after.
 - **RunMirrorPhone**: iOS, plus a do-nothing macOS stand-in for the watch link. Contains:
-  - `RunCues`: spoken holds and ticks, plus a silent keepalive that runs the timer with the screen locked. It ducks music, or doesn't mix when pocket controls are on. It restarts after interruptions and route changes.
-  - `RunRemote`: Now Playing and lock-screen/AirPods ⏮⏯⏭.
+  - `RunCues`: spoken holds and ticks, plus a silent keepalive that runs the timer with the screen locked. Its session (`RunAudioSession`) mixes with music at full volume and ducks it only while a cue is spoken (`CueDucker`), or doesn't mix when the AirPods & lock-screen controls are on. It restarts after interruptions and route changes.
+  - `RunRemote`: Now Playing and lock-screen/AirPods ⏮⏯⏭. Only these need the non-mixing session; the watch app's buttons work either way.
   - `WatchRunLink`: the phone's end of the watch link. It sends application context plus live messages, and launches the watch app into its workout.
 - **RunMirrorWatch**: watchOS. Contains:
   - `RunMirror`: the countdown from `endsAt`, plus haptics. The haptics are start, stop, a click for each of the last 3 s, and success at the end.
