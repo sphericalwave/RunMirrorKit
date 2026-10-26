@@ -14,7 +14,7 @@
 //  (`startWatchApp`), so there's nothing to open on the wrist.
 //
 //  None of this touches the audio session: it works with the AirPods &
-//  Watch controls off and music playing.
+//  lock-screen controls off and music playing.
 //
 //  WCSession has one delegate. An app with something else on the session
 //  (heart rate streamed from the watch, say) hands its delegate over with

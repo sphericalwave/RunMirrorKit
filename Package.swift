@@ -32,5 +32,7 @@ let package = Package(
         .target(name: "RunMirrorPhone", dependencies: ["RunMirrorKit"], swiftSettings: settings),
         .target(name: "RunMirrorWatch", dependencies: ["RunMirrorKit"], swiftSettings: settings),
         .testTarget(name: "RunMirrorKitTests", dependencies: ["RunMirrorKit"], swiftSettings: settings),
+        .testTarget(name: "RunMirrorPhoneTests", dependencies: ["RunMirrorKit", "RunMirrorPhone"],
+                    swiftSettings: settings),
     ]
 )

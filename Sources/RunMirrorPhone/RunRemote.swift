@@ -11,6 +11,9 @@
 //  others, so with this on a run pauses your music; off, music plays on
 //  under the cues and the controls stay with the music app.
 //
+//  The run's own Apple Watch app doesn't depend on this: its buttons come
+//  over WatchConnectivity (`WatchRunLink`), on or off.
+//
 //  A phone call pauses the run, and it picks up again after if iOS says it
 //  should (`RunInterruptions`).
 //
@@ -23,6 +26,7 @@ import RunMirrorKit
 public final class RunRemote {
     public static let shared = RunRemote()
 
+    /// The AirPods & lock-screen controls setting. The key predates the name.
     public static let enabledKey = "runPocketControls"
     /// Off unless turned on, so music keeps playing by default.
     public static var isEnabled: Bool { UserDefaults.standard.bool(forKey: enabledKey) }

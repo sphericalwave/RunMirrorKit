@@ -7,9 +7,8 @@
 //  A silent loop keeps the audio session — and so the timer — alive with the
 //  screen locked; the app must declare the audio background mode.
 //
-//  With the AirPods & Watch controls on (`RunRemote`) the session doesn't
-//  mix, since iOS only gives those controls to an app that doesn't; off,
-//  music ducks under the cues instead.
+//  The session is `RunAudioSession`'s: mixed with music, ducking it, unless
+//  the AirPods & lock-screen controls (`RunRemote`) are on.
 //
 
 import AVFoundation
@@ -52,10 +51,7 @@ public final class RunCues: NSObject, RunCueing, AVSpeechSynthesizerDelegate {
         endAfterSpeech = false
         guard !running else { return }
         #if os(iOS)
-        let session = AVAudioSession.sharedInstance()
-        try? session.setCategory(.playback, mode: .spokenAudio,
-                                 options: RunRemote.isEnabled ? [] : [.duckOthers])
-        try? session.setActive(true)
+        RunAudioSession.activate()
         #endif
         playSilence()
         running = true
