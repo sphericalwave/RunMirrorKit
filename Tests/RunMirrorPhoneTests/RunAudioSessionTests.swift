@@ -2,8 +2,9 @@
 //  RunAudioSessionTests.swift
 //  RunMirrorPhoneTests
 //
-//  Off, a run mixes with music and ducks it; on, it takes the audio so the
-//  AirPods and lock screen drive it. Either way it can run locked.
+//  Off, a run mixes with music, ducking it only for cues; on, it takes the
+//  audio so the AirPods and lock screen drive it. Either way it can run
+//  locked.
 //
 
 #if os(iOS)
@@ -12,24 +13,32 @@ import XCTest
 @testable import RunMirrorPhone
 
 final class RunAudioSessionTests: XCTestCase {
-    func testOffMixesWithMusicAndDucksIt() {
+    func testOffMixesWithMusicAtFullVolume() {
         let configuration = RunAudioSession.configuration(remoteControls: false)
-        XCTAssertTrue(configuration.options.contains(.mixWithOthers))
-        XCTAssertTrue(configuration.options.contains(.duckOthers))
+        XCTAssertEqual(configuration.options, [.mixWithOthers])
+    }
+
+    func testOffDucksTheMusicForACue() {
+        let configuration = RunAudioSession.cueConfiguration(remoteControls: false)
+        XCTAssertEqual(configuration.options, [.mixWithOthers, .duckOthers])
     }
 
     func testOnTakesTheAudioSoTheRemoteCommandsComeHere() {
-        let configuration = RunAudioSession.configuration(remoteControls: true)
-        XCTAssertFalse(configuration.options.contains(.mixWithOthers))
-        XCTAssertFalse(configuration.options.contains(.duckOthers))
+        for configuration in [RunAudioSession.configuration(remoteControls: true),
+                              RunAudioSession.cueConfiguration(remoteControls: true)] {
+            XCTAssertFalse(configuration.options.contains(.mixWithOthers))
+            XCTAssertFalse(configuration.options.contains(.duckOthers))
+        }
     }
 
     /// `.playback` is what the audio background mode keeps going locked.
     func testBothArePlaybackSoTheRunKeepsGoingLocked() {
         for on in [false, true] {
-            let configuration = RunAudioSession.configuration(remoteControls: on)
-            XCTAssertEqual(configuration.category, .playback)
-            XCTAssertEqual(configuration.mode, .spokenAudio)
+            for configuration in [RunAudioSession.configuration(remoteControls: on),
+                                  RunAudioSession.cueConfiguration(remoteControls: on)] {
+                XCTAssertEqual(configuration.category, .playback)
+                XCTAssertEqual(configuration.mode, .spokenAudio)
+            }
         }
     }
 

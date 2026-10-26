@@ -7,8 +7,9 @@
 //  A silent loop keeps the audio session — and so the timer — alive with the
 //  screen locked; the app must declare the audio background mode.
 //
-//  The session is `RunAudioSession`'s: mixed with music, ducking it, unless
-//  the AirPods & lock-screen controls (`RunRemote`) are on.
+//  The session is `RunAudioSession`'s: mixed with music, dipping it only
+//  while something is said (`CueDucker`), unless the AirPods & lock-screen
+//  controls (`RunRemote`) are on.
 //
 
 import AVFoundation
@@ -32,6 +33,9 @@ public final class RunCues: NSObject, RunCueing, AVSpeechSynthesizerDelegate {
     private let silence = AVAudioPlayerNode()
     private var running = false
     private var endAfterSpeech = false
+    #if os(iOS)
+    private let ducker = CueDucker()
+    #endif
 
     override private init() {
         super.init()
@@ -51,7 +55,7 @@ public final class RunCues: NSObject, RunCueing, AVSpeechSynthesizerDelegate {
         endAfterSpeech = false
         guard !running else { return }
         #if os(iOS)
-        RunAudioSession.activate()
+        ducker.begin(remoteControls: RunRemote.isEnabled)
         #endif
         playSilence()
         running = true
@@ -97,6 +101,9 @@ public final class RunCues: NSObject, RunCueing, AVSpeechSynthesizerDelegate {
     #endif
 
     public func announce(_ text: String) {
+        #if os(iOS)
+        if running { ducker.cueStarted() }
+        #endif
         let utterance = AVSpeechUtterance(string: text)
         utterance.rate = AVSpeechUtteranceDefaultSpeechRate * 0.95
         synth.speak(utterance)
@@ -123,13 +130,26 @@ public final class RunCues: NSObject, RunCueing, AVSpeechSynthesizerDelegate {
         silence.stop()
         engine.stop()
         #if os(iOS)
+        ducker.end()
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
         #endif
     }
 
     public func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
-        guard endAfterSpeech, !synthesizer.isSpeaking else { return }
+        guard !synthesizer.isSpeaking else { return }
+        guard endAfterSpeech else {
+            #if os(iOS)
+            ducker.cueEnded()
+            #endif
+            return
+        }
         endAfterSpeech = false
         end()
+    }
+
+    public func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
+        #if os(iOS)
+        if !synthesizer.isSpeaking { ducker.cueEnded() }
+        #endif
     }
 }
