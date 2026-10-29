@@ -26,6 +26,24 @@ final class WatchRunMessageTests: XCTestCase {
         XCTAssertTrue(WatchRunMessage.isRunMessage(WatchRunMessage.encode(s)))
     }
 
+    func testSidesRoundTrip() {
+        var s = state(endsAt: now.addingTimeInterval(30))
+        s.sides = [.init(name: "Right", label: "R", status: .done),
+                   .init(name: "Left", label: "L", status: .current)]
+        XCTAssertEqual(WatchRunMessage.state(in: WatchRunMessage.encode(s))?.sides, s.sides)
+    }
+
+    /// A phone that predates sides still drives a watch that knows them.
+    func testAStateWithoutSidesDecodesWithNone() throws {
+        let s = state(endsAt: now.addingTimeInterval(30))
+        var json = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(s)) as? [String: Any])
+        XCTAssertNotNil(json.removeValue(forKey: "sides"))
+        let old = try JSONSerialization.data(withJSONObject: json)
+        let decoded = try XCTUnwrap(WatchRunMessage.state(in: [WatchRunMessage.stateKey: old]))
+        XCTAssertEqual(decoded.sides, [])
+        XCTAssertEqual(decoded, s)
+    }
+
     func testCommandsHeartRateAndNotesRoundTrip() {
         XCTAssertEqual(WatchRunMessage.command(in: WatchRunMessage.encode(WatchRunCommand.back)), .back)
         XCTAssertEqual(WatchRunMessage.heartRate(in: WatchRunMessage.encode(heartRate: 64)), 64)

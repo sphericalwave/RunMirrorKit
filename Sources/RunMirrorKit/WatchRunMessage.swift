@@ -25,6 +25,26 @@ public nonisolated struct WatchRunState: Codable, Equatable, Sendable {
         case left
     }
 
+    /// One side of the exercise on — "R" done, "L" being held — so a glance
+    /// says which sides are through this round.
+    public struct Side: Codable, Equatable, Sendable {
+        public enum Status: String, Codable, Sendable {
+            case done, current, upcoming
+        }
+
+        /// "Right", for VoiceOver.
+        public var name: String
+        /// "R", for the badge.
+        public var label: String
+        public var status: Status
+
+        public init(name: String, label: String, status: Status) {
+            self.name = name
+            self.label = label
+            self.status = status
+        }
+    }
+
     /// One run: the workout and when it started. A new one is a new watch
     /// workout; the same one picked up later carries on under it.
     public var runID: String
@@ -36,6 +56,10 @@ public nonisolated struct WatchRunState: Codable, Equatable, Sendable {
     public var isResting: Bool
     /// "Between sides" and the like; empty for a digit's rest.
     public var restLabel: String
+    /// The sides of the exercise on — or, in a rest, the one coming up — this
+    /// round, in the order they're held. Empty when there's no pair of sides
+    /// to keep track of.
+    public var sides: [Side]
     /// "Squat · Left" — the hold after this one, or the one a rest leads into.
     public var next: String?
     public var nextIsNewRound: Bool
@@ -58,7 +82,7 @@ public nonisolated struct WatchRunState: Codable, Equatable, Sendable {
     public var sentAt: Date = .distantPast
 
     public init(runID: String, status: Status, planName: String, exercise: String, side: String,
-                isResting: Bool, restLabel: String, next: String?, nextIsNewRound: Bool,
+                isResting: Bool, restLabel: String, sides: [Side] = [], next: String?, nextIsNewRound: Bool,
                 round: Int, rounds: Int, durationSec: Int, endsAt: Date?, pausedRemainingSec: Int?,
                 segment: Int, saveToHealth: Bool, sentAt: Date = .distantPast) {
         self.runID = runID
@@ -68,6 +92,7 @@ public nonisolated struct WatchRunState: Codable, Equatable, Sendable {
         self.side = side
         self.isResting = isResting
         self.restLabel = restLabel
+        self.sides = sides
         self.next = next
         self.nextIsNewRound = nextIsNewRound
         self.round = round
@@ -78,6 +103,29 @@ public nonisolated struct WatchRunState: Codable, Equatable, Sendable {
         self.segment = segment
         self.saveToHealth = saveToHealth
         self.sentAt = sentAt
+    }
+
+    /// A state from a phone that predates `sides` decodes with none.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        runID = try c.decode(String.self, forKey: .runID)
+        status = try c.decode(Status.self, forKey: .status)
+        planName = try c.decode(String.self, forKey: .planName)
+        exercise = try c.decode(String.self, forKey: .exercise)
+        side = try c.decode(String.self, forKey: .side)
+        isResting = try c.decode(Bool.self, forKey: .isResting)
+        restLabel = try c.decode(String.self, forKey: .restLabel)
+        sides = try c.decodeIfPresent([Side].self, forKey: .sides) ?? []
+        next = try c.decodeIfPresent(String.self, forKey: .next)
+        nextIsNewRound = try c.decode(Bool.self, forKey: .nextIsNewRound)
+        round = try c.decode(Int.self, forKey: .round)
+        rounds = try c.decode(Int.self, forKey: .rounds)
+        durationSec = try c.decode(Int.self, forKey: .durationSec)
+        endsAt = try c.decodeIfPresent(Date.self, forKey: .endsAt)
+        pausedRemainingSec = try c.decodeIfPresent(Int.self, forKey: .pausedRemainingSec)
+        segment = try c.decode(Int.self, forKey: .segment)
+        saveToHealth = try c.decode(Bool.self, forKey: .saveToHealth)
+        sentAt = try c.decode(Date.self, forKey: .sentAt)
     }
 
     /// Whole seconds left at `date`, as the phone's clock would show them.
