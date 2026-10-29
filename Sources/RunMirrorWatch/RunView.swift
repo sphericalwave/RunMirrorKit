@@ -3,7 +3,7 @@
 //  RunMirrorKit
 //
 //  The hold or rest in progress, glanced at mid-hold: what it is, which
-//  side, a big countdown, the round, and ⏮ ⏯ ⏭ as large as the screen
+//  side and which are done, a big countdown, the round, and ⏮ ⏯ ⏭ as large as the screen
 //  allows. ⏮ once starts the hold over, twice goes back one; ⏭ goes on —
 //  the phone's own buttons, run on the phone.
 //
@@ -55,9 +55,14 @@ public struct RunView: View {
     @ViewBuilder
     private var heading: some View {
         if state.isResting {
-            Text("Rest")
-                .font(.headline)
-                .foregroundStyle(.tint)
+            HStack(spacing: 6) {
+                Text("Rest")
+                    .font(.headline)
+                    .foregroundStyle(.tint)
+                if !state.sides.isEmpty {
+                    SideBadges(sides: state.sides)
+                }
+            }
             if let next = state.next {
                 Text("next: \(next)")
                     .font(.footnote)
@@ -72,9 +77,15 @@ public struct RunView: View {
                 .minimumScaleFactor(0.7)
                 .multilineTextAlignment(.center)
             if !state.side.isEmpty {
-                Text(state.side)
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(.tint)
+                HStack(spacing: 6) {
+                    Text(state.side)
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.tint)
+                        .lineLimit(1)
+                    if !state.sides.isEmpty {
+                        SideBadges(sides: state.sides)
+                    }
+                }
             }
         }
     }
