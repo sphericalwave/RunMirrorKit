@@ -146,6 +146,7 @@ public nonisolated enum WatchRunMessage {
     public static let heartRateKey = "bpm"
     public static let workoutNoteKey = "workoutNote"
     public static let noteRunIDKey = "noteRunID"
+    public static let stateRequestKey = "runStateRequest"
 
     public static func encode(_ state: WatchRunState) -> [String: Any] {
         guard let data = try? JSONEncoder().encode(state) else { return [:] }
@@ -163,6 +164,17 @@ public nonisolated enum WatchRunMessage {
 
     public static func command(in message: [String: Any]) -> WatchRunCommand? {
         (message[commandKey] as? String).flatMap(WatchRunCommand.init(rawValue:))
+    }
+
+    /// The watch asking for the run as it stands, when what it has has run
+    /// out with nothing newer. Answered in the reply with `encode(_:)` of the
+    /// latest state, or empty when there's no run.
+    public static func encodeStateRequest() -> [String: Any] {
+        [stateRequestKey: true]
+    }
+
+    public static func isStateRequest(_ message: [String: Any]) -> Bool {
+        message[stateRequestKey] != nil
     }
 
     public static func encode(heartRate bpm: Int) -> [String: Any] {
@@ -187,7 +199,7 @@ public nonisolated enum WatchRunMessage {
     /// another feature's, for whoever else is listening on the session.
     public static func isRunMessage(_ message: [String: Any]) -> Bool {
         message[stateKey] != nil || message[commandKey] != nil || message[heartRateKey] != nil
-            || message[workoutNoteKey] != nil
+            || message[workoutNoteKey] != nil || message[stateRequestKey] != nil
     }
 }
 

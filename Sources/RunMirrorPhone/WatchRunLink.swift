@@ -186,6 +186,11 @@ extension WatchRunLink: WCSessionDelegate {
             }
             return
         }
+        if WatchRunMessage.isStateRequest(message) {
+            // The watch's run ran out with nothing newer: the latest, again.
+            Task { @MainActor in replyHandler(self.last.map(WatchRunMessage.encode) ?? [:]) }
+            return
+        }
         let command = WatchRunMessage.command(in: message)
         let bpm = WatchRunMessage.heartRate(in: message)
         replyHandler([:])
