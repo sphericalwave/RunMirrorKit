@@ -26,6 +26,16 @@ final class WatchRunMessageTests: XCTestCase {
         XCTAssertTrue(WatchRunMessage.isRunMessage(WatchRunMessage.encode(s)))
     }
 
+    /// The watch's "what's the run now?" is the run's, and nothing else.
+    func testStateRequestIsARunMessage() {
+        let request = WatchRunMessage.encodeStateRequest()
+        XCTAssertTrue(WatchRunMessage.isStateRequest(request))
+        XCTAssertTrue(WatchRunMessage.isRunMessage(request))
+        XCTAssertNil(WatchRunMessage.state(in: request))
+        XCTAssertNil(WatchRunMessage.command(in: request))
+        XCTAssertFalse(WatchRunMessage.isStateRequest(WatchRunMessage.encode(.toggle)))
+    }
+
     func testSidesRoundTrip() {
         var s = state(endsAt: now.addingTimeInterval(30))
         s.sides = [.init(name: "Right", label: "R", status: .done),

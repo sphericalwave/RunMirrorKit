@@ -74,9 +74,26 @@ public final class PhoneLink: NSObject {
         }
     }
 
+    /// Asks the phone for the run as it stands; the answer comes back as
+    /// `onState`. For when a state the phone sent didn't arrive — application
+    /// context can wait on the system, and a message can be dropped — so the
+    /// watch would otherwise sit on a run that's moved on. A phone with no run,
+    /// or one too old to answer, replies with nothing.
+    public func requestState() {
+        let session = WCSession.default
+        guard session.activationState == .activated, session.isReachable else { return }
+        session.sendMessage(WatchRunMessage.encodeStateRequest(), replyHandler: { reply in
+            guard let state = WatchRunMessage.state(in: reply) else { return }
+            Task { @MainActor in self.onState?(state) }
+        }, errorHandler: nil)
+    }
+
     private func reachabilityChanged(_ reachable: Bool) {
+        let regained = reachable && !isReachable
         isReachable = reachable
         if reachable { sendFailed = false }
+        // Whatever was sent while out of reach may still be on its way.
+        if regained { requestState() }
     }
 }
 

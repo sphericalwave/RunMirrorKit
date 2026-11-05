@@ -35,6 +35,10 @@ public final class RunMirror {
     @ObservationIgnored private var ticking: Task<Void, Never>?
     /// The last countdown second clicked, by segment, so each clicks once.
     @ObservationIgnored private var clicked: (segment: Int, second: Int)?
+    /// When the phone was last asked for the run, so a silent one is asked
+    /// every few seconds rather than every tick.
+    @ObservationIgnored private var askedAt: Date?
+    static let askEvery: TimeInterval = 5
 
     public init(brand: WatchRunBrand) {
         self.brand = brand
@@ -147,10 +151,22 @@ public final class RunMirror {
 
     private func tick() {
         guard let state, state.status == .running, !state.isPaused else { return }
+        askIfStale(at: Date())
         let left = state.remainingSec(at: Date())
         guard (1...3).contains(left), clicked?.segment != state.segment || clicked?.second != left else { return }
         clicked = (state.segment, left)
         play(.click)
+    }
+
+    /// The hold or rest the watch has ran out and nothing newer came: the
+    /// phone's run moved on without it, so ask for where it is now. The
+    /// answer is whatever the phone would have sent; a phone that really is
+    /// silent leaves "Waiting for iPhone…" up.
+    private func askIfStale(at date: Date) {
+        guard let endsAt = state?.endsAt, date > endsAt.addingTimeInterval(1) else { return }
+        if let askedAt, date.timeIntervalSince(askedAt) < Self.askEvery { return }
+        askedAt = date
+        phone.requestState()
     }
 
     private func play(_ haptic: WKHapticType) {
