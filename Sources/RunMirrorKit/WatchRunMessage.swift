@@ -133,6 +133,26 @@ public nonisolated struct WatchRunState: Codable, Equatable, Sendable {
         guard let endsAt else { return pausedRemainingSec ?? 0 }
         return max(0, Int(endsAt.timeIntervalSince(date).rounded(.up)))
     }
+
+    /// What the phone will make of `command`, shown on the wrist at once
+    /// rather than after the round trip. Only ⏯ is certain enough to guess;
+    /// nil for the rest, and for a run that isn't going. Stamped a hair after
+    /// this one, so this same state arriving again — a reply or context that
+    /// crossed the command — can't undo it, while anything the phone sends
+    /// from now on still wins.
+    public func applying(_ command: WatchRunCommand, at date: Date) -> WatchRunState? {
+        guard command == .toggle, status == .running else { return nil }
+        var next = self
+        if isPaused {
+            next.endsAt = date.addingTimeInterval(TimeInterval(pausedRemainingSec ?? 0))
+            next.pausedRemainingSec = nil
+        } else {
+            next.pausedRemainingSec = remainingSec(at: date)
+            next.endsAt = nil
+        }
+        next.sentAt = sentAt.addingTimeInterval(0.001)
+        return next
+    }
 }
 
 public nonisolated enum WatchRunCommand: String, Codable, Sendable {
@@ -147,6 +167,12 @@ public nonisolated enum WatchRunMessage {
     public static let workoutNoteKey = "workoutNote"
     public static let noteRunIDKey = "noteRunID"
     public static let stateRequestKey = "runStateRequest"
+    public static let commandIDKey = "runCommandID"
+    public static let commandSentAtKey = "runCommandSentAt"
+    /// A command that came the slow way — application context, after its
+    /// messages failed — is only acted on this soon after it was sent: a ⏭
+    /// landing a minute late would skip a hold nobody meant to skip.
+    public static let commandFreshFor: TimeInterval = 10
 
     public static func encode(_ state: WatchRunState) -> [String: Any] {
         guard let data = try? JSONEncoder().encode(state) else { return [:] }
@@ -158,8 +184,21 @@ public nonisolated enum WatchRunMessage {
         return try? JSONDecoder().decode(WatchRunState.self, from: data)
     }
 
-    public static func encode(_ command: WatchRunCommand) -> [String: Any] {
-        [commandKey: command.rawValue]
+    /// `id` is the same on every try of one press, so the phone acts on it
+    /// once however many arrive.
+    public static func encode(_ command: WatchRunCommand, id: String? = nil, sentAt: Date? = nil) -> [String: Any] {
+        var message: [String: Any] = [commandKey: command.rawValue]
+        if let id { message[commandIDKey] = id }
+        if let sentAt { message[commandSentAtKey] = sentAt.timeIntervalSince1970 }
+        return message
+    }
+
+    public static func commandID(in message: [String: Any]) -> String? {
+        message[commandIDKey] as? String
+    }
+
+    public static func commandSentAt(in message: [String: Any]) -> Date? {
+        (message[commandSentAtKey] as? TimeInterval).map(Date.init(timeIntervalSince1970:))
     }
 
     public static func command(in message: [String: Any]) -> WatchRunCommand? {

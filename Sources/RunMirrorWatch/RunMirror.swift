@@ -46,6 +46,8 @@ public final class RunMirror {
         phone.onState = { [weak self] in self?.apply($0) }
         workout.onHeartRate = { [weak self] in self?.phone.send(heartRate: $0) }
         workout.onNotSaved = { [weak self] in self?.phone.send($0) }
+        // The guess on the wrist may be wrong: whatever the phone has, as soon as it can say.
+        phone.onCommandUndelivered = { [weak self] in self?.phone.requestState() }
     }
 
     public func activate() {
@@ -64,8 +66,11 @@ public final class RunMirror {
                       planName: state?.planName ?? "")
     }
 
+    /// ⏯ shows on the wrist straight away; the phone's answer, which comes
+    /// back with the command's reply, confirms it or puts it right.
     public func send(_ command: WatchRunCommand) {
         WKInterfaceDevice.current().play(.click)
+        if let guess = state?.applying(command, at: Date()) { apply(guess) }
         phone.send(command)
     }
 

@@ -6,9 +6,13 @@
 //  heart rate and any "workout not saved" note out. The phone runs the workout; nothing here decides
 //  anything about it.
 //
-//  Commands only go while the phone can be reached — a ⏭ held back and
-//  delivered a minute later would skip a hold nobody meant to skip — so
-//  the buttons are off while it can't.
+//  A command goes as a message with a reply, which brings the run back as
+//  the phone has it after acting on it — no waiting for the phone's next
+//  update. A message that fails is tried again a couple of times, then left
+//  as application context; the phone ignores that if it's more than a few
+//  seconds old by the time it lands, since a ⏭ delivered a minute later
+//  would skip a hold nobody meant to skip. Every try of one press carries
+//  the same id, so the phone acts on it once.
 //
 //  WCSession has one delegate, and this is it. Anything the phone sends that
 //  isn't the run's goes to `onOther`, for the app's other features.
@@ -39,17 +43,53 @@ public final class PhoneLink: NSObject {
         session.activate()
     }
 
+    /// Called when a command's messages all failed and it was left as
+    /// application context — the run on the wrist may not be the phone's.
+    @ObservationIgnored public var onCommandUndelivered: (() -> Void)?
+
+    /// How many times a command's message is tried, and the wait before each retry.
+    static let commandTries = 3
+    static let retryAfter: Duration = .milliseconds(300)
+
     public func send(_ command: WatchRunCommand) {
+        let message = WatchRunMessage.encode(command, id: UUID().uuidString, sentAt: Date())
+        send(command: message, try: 1)
+    }
+
+    private func send(command message: [String: Any], try attempt: Int) {
         let session = WCSession.default
-        guard session.activationState == .activated, session.isReachable else {
+        guard session.activationState == .activated else {
             sendFailed = true
             return
         }
-        session.sendMessage(WatchRunMessage.encode(command), replyHandler: { _ in
-            Task { @MainActor in self.sendFailed = false }
+        guard session.isReachable else {
+            leave(command: message)
+            return
+        }
+        session.sendMessage(message, replyHandler: { reply in
+            let state = WatchRunMessage.state(in: reply)
+            Task { @MainActor in
+                self.sendFailed = false
+                if let state { self.onState?(state) }
+            }
         }, errorHandler: { _ in
-            Task { @MainActor in self.sendFailed = true }
+            Task { @MainActor in
+                guard attempt < Self.commandTries else {
+                    self.leave(command: message)
+                    return
+                }
+                try? await Task.sleep(for: Self.retryAfter * attempt)
+                self.send(command: message, try: attempt + 1)
+            }
         })
+    }
+
+    /// The last resort: delivered whenever the system gets to it, and acted
+    /// on only if that's soon.
+    private func leave(command message: [String: Any]) {
+        sendFailed = true
+        try? WCSession.default.updateApplicationContext(message)
+        onCommandUndelivered?()
     }
 
     /// Live only: a reading that can't go now is stale by the time it could.
