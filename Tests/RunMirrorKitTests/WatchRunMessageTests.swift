@@ -36,6 +36,43 @@ final class WatchRunMessageTests: XCTestCase {
         XCTAssertFalse(WatchRunMessage.isStateRequest(WatchRunMessage.encode(.toggle)))
     }
 
+    /// Every try of one press carries the same id, and when it was pressed.
+    func testCommandCarriesIDAndSentAt() {
+        let message = WatchRunMessage.encode(.toggle, id: "abc", sentAt: now)
+        XCTAssertEqual(WatchRunMessage.command(in: message), .toggle)
+        XCTAssertEqual(WatchRunMessage.commandID(in: message), "abc")
+        XCTAssertEqual(WatchRunMessage.commandSentAt(in: message), now)
+        XCTAssertNil(WatchRunMessage.commandID(in: WatchRunMessage.encode(.toggle)))
+    }
+
+    /// ⏯ pauses on the wrist at once, keeping what was left.
+    func testToggleGuessPauses() throws {
+        let running = state(endsAt: now.addingTimeInterval(12))
+        let guess = try XCTUnwrap(running.applying(.toggle, at: now))
+        XCTAssertTrue(guess.isPaused)
+        XCTAssertEqual(guess.pausedRemainingSec, 12)
+        XCTAssertGreaterThan(guess.sentAt, running.sentAt)
+    }
+
+    /// …and resumes from where it was.
+    func testToggleGuessResumes() throws {
+        let paused = state(endsAt: nil, paused: 12)
+        let guess = try XCTUnwrap(paused.applying(.toggle, at: now))
+        XCTAssertFalse(guess.isPaused)
+        XCTAssertEqual(guess.endsAt, now.addingTimeInterval(12))
+        XCTAssertNil(guess.pausedRemainingSec)
+    }
+
+    /// Only ⏯ on a run that's going is guessed.
+    func testOnlyToggleIsGuessed() {
+        let running = state(endsAt: now.addingTimeInterval(12))
+        XCTAssertNil(running.applying(.forward, at: now))
+        XCTAssertNil(running.applying(.back, at: now))
+        var finished = running
+        finished.status = .finished
+        XCTAssertNil(finished.applying(.toggle, at: now))
+    }
+
     func testSidesRoundTrip() {
         var s = state(endsAt: now.addingTimeInterval(30))
         s.sides = [.init(name: "Right", label: "R", status: .done),

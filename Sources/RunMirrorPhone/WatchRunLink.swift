@@ -10,6 +10,12 @@
 //  which reach this app with the phone locked in a pocket since a
 //  run keeps it going in the background with its audio.
 //
+//  A command is acted on the moment it lands — not on the run's next tick —
+//  and the reply carries the run as it stands after it, so the watch is
+//  right again within one round trip. Retries of one press share an id and
+//  are acted on once; one that only made it as application context counts
+//  if it's fresh (`WatchRunMessage.commandFreshFor`).
+//
 //  The first moment of a run also launches the watch app into its workout
 //  (`startWatchApp`), so there's nothing to open on the wrist.
 //
@@ -41,6 +47,8 @@ public final class WatchRunLink: NSObject {
     public private(set) var workoutNote: WatchWorkoutNote?
 
     /// The run's ⏮ ⏯ ⏭ and End, while there's a run to send them to.
+    /// Expected to `publish` the run as the command leaves it before it
+    /// returns, so the reply can carry it.
     @ObservationIgnored public var onCommand: ((WatchRunCommand) -> Void)?
     @ObservationIgnored public var onHeartRate: ((Int) -> Void)?
 
@@ -55,6 +63,8 @@ public final class WatchRunLink: NSObject {
     @ObservationIgnored private var activityType = HKWorkoutActivityType.functionalStrengthTraining
     /// Whoever else listens on the session: what isn't the run's goes there.
     @ObservationIgnored private weak var other: WCSessionDelegate?
+    /// The latest commands acted on, so a retry of one isn't acted on twice.
+    @ObservationIgnored private var handledCommandIDs: [String] = []
 
     override private init() { super.init() }
 
@@ -124,9 +134,20 @@ public final class WatchRunLink: NSObject {
         health.startWatchApp(with: configuration) { _, _ in }
     }
 
-    private func handle(command: WatchRunCommand?, heartRate bpm: Int?, note: WatchWorkoutNote? = nil) {
+    /// Once per id: a command whose reply was lost comes again.
+    private func perform(_ command: WatchRunCommand, id: String?) {
+        if let id {
+            guard !handledCommandIDs.contains(id) else { return }
+            handledCommandIDs.append(id)
+            if handledCommandIDs.count > 32 { handledCommandIDs.removeFirst() }
+        }
+        onCommand?(command)
+    }
+
+    private func handle(command: WatchRunCommand?, id: String? = nil, heartRate bpm: Int?,
+                        note: WatchWorkoutNote? = nil) {
         if let note { workoutNote = note }
-        if let command { onCommand?(command) }
+        if let command { perform(command, id: id) }
         if let bpm {
             heartRate = bpm
             heartRateAt = Date()
@@ -159,9 +180,23 @@ extension WatchRunLink: WCSessionDelegate {
             return
         }
         let command = WatchRunMessage.command(in: message)
+        let id = WatchRunMessage.commandID(in: message)
         let bpm = WatchRunMessage.heartRate(in: message)
         let note = WatchRunMessage.workoutNote(in: message)
-        Task { @MainActor in self.handle(command: command, heartRate: bpm, note: note) }
+        Task { @MainActor in self.handle(command: command, id: id, heartRate: bpm, note: note) }
+    }
+
+    /// A command the watch couldn't get through as a message — acted on only
+    /// if it's still news.
+    public nonisolated func session(_ session: WCSession, didReceiveApplicationContext context: [String: Any]) {
+        guard let command = WatchRunMessage.command(in: context) else {
+            Task { @MainActor in self.other?.session?(session, didReceiveApplicationContext: context) }
+            return
+        }
+        guard let sentAt = WatchRunMessage.commandSentAt(in: context),
+              Date().timeIntervalSince(sentAt) < WatchRunMessage.commandFreshFor else { return }
+        let id = WatchRunMessage.commandID(in: context)
+        Task { @MainActor in self.handle(command: command, id: id, heartRate: nil) }
     }
 
     /// A note the watch queued while the phone was out of reach.
@@ -192,9 +227,18 @@ extension WatchRunLink: WCSessionDelegate {
             return
         }
         let command = WatchRunMessage.command(in: message)
+        let id = WatchRunMessage.commandID(in: message)
         let bpm = WatchRunMessage.heartRate(in: message)
-        replyHandler([:])
-        Task { @MainActor in self.handle(command: command, heartRate: bpm) }
+        guard command != nil else {
+            replyHandler([:])
+            Task { @MainActor in self.handle(command: nil, heartRate: bpm) }
+            return
+        }
+        // Acted on now, and answered with the run as it's left.
+        Task { @MainActor in
+            self.handle(command: command, id: id, heartRate: bpm)
+            replyHandler(self.last.map(WatchRunMessage.encode) ?? [:])
+        }
     }
 
     /// The watch app opened mid-run: send it the run now rather than waiting
