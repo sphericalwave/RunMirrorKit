@@ -98,6 +98,11 @@ public final class WatchRunLink: NSObject {
     /// Sends the run as it stands, unless the watch has it already.
     public func publish(_ state: WatchRunState) {
         guard state != unstamped else { return }
+        // Paused long enough, the watch ended its workout: resuming is a new
+        // one to launch, since the watch app may well be asleep by now.
+        if let last, last.runID == state.runID, last.longPause(at: Date()) == .end {
+            launchedFor = nil
+        }
         unstamped = state
         var stamped = state
         stamped.sentAt = Date()

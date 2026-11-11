@@ -47,6 +47,9 @@ public final class WatchWorkout: NSObject {
     @ObservationIgnored private var session: HKWorkoutSession?
     @ObservationIgnored private var builder: HKLiveWorkoutBuilder?
     @ObservationIgnored private var planName = ""
+    /// The run's pause, held so one that lands while the session is still
+    /// starting is applied once it's running rather than lost.
+    @ObservationIgnored private var wantsPaused = false
     /// When each heart rate reading was taken — how long the watch was worn.
     @ObservationIgnored private var heartRateTimes: [Date] = []
 
@@ -103,6 +106,7 @@ public final class WatchWorkout: NSObject {
             heartRateTimes = []
             problem = nil
             notSaved = nil
+            wantsPaused = false
             isActive = true
             let now = Date()
             session.startActivity(with: now)
@@ -119,14 +123,26 @@ public final class WatchWorkout: NSObject {
         self.planName = planName
     }
 
+    /// Paused, the session stays a workout — and watchOS may keep the heart
+    /// rate sensor on — so a long pause is ended outright (`RunMirror`).
     public func pause() {
+        wantsPaused = true
         guard session?.state == .running else { return }
         session?.pause()
     }
 
     public func resume() {
+        wantsPaused = false
         guard session?.state == .paused else { return }
         session?.resume()
+    }
+
+    /// The session reached `state`: put it where the run is now, if a
+    /// pause or resume came while it couldn't take one.
+    private func settle(_ session: HKWorkoutSession, at state: HKWorkoutSessionState) {
+        guard session === self.session else { return }
+        if state == .running, wantsPaused { session.pause() }
+        if state == .paused, !wantsPaused { session.resume() }
     }
 
     /// Ends the session; the workout's saved or dropped once it has.
@@ -138,6 +154,7 @@ public final class WatchWorkout: NSObject {
         self.session = nil
         builder = nil
         runID = nil
+        wantsPaused = false
         session.end()
     }
 
@@ -216,8 +233,13 @@ extension WatchWorkout: HKWorkoutSessionDelegate {
     public nonisolated func workoutSession(_ workoutSession: HKWorkoutSession,
                                     didChangeTo toState: HKWorkoutSessionState,
                                     from fromState: HKWorkoutSessionState, date: Date) {
-        guard toState == .ended else { return }
-        Task { @MainActor in await self.finish(workoutSession) }
+        Task { @MainActor in
+            if toState == .ended {
+                await self.finish(workoutSession)
+            } else {
+                self.settle(workoutSession, at: toState)
+            }
+        }
     }
 
     public nonisolated func workoutSession(_ workoutSession: HKWorkoutSession, didFailWithError error: Error) {

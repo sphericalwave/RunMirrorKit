@@ -139,4 +139,55 @@ final class WatchRunMessageTests: XCTestCase {
         XCTAssertEqual(WatchWorkoutSaveRule.decide(enabled: true, start: now, end: end, activeDuration: 600,
                                                    heartRateTimes: readings, others: [theirs]), .recordedElsewhere)
     }
+
+    // MARK: Long pause
+
+    func testLongPauseStages() {
+        XCTAssertEqual(LongPause.stage(pausedFor: 9 * 60, promptAfterMin: 10, endAfterMin: 30), .none)
+        XCTAssertEqual(LongPause.stage(pausedFor: 10 * 60, promptAfterMin: 10, endAfterMin: 30), .prompt)
+        XCTAssertEqual(LongPause.stage(pausedFor: 30 * 60, promptAfterMin: 10, endAfterMin: 30), .end)
+        // 0 turns a stage off.
+        XCTAssertEqual(LongPause.stage(pausedFor: 60 * 60, promptAfterMin: 10, endAfterMin: 0), .prompt)
+        XCTAssertEqual(LongPause.stage(pausedFor: 60 * 60, promptAfterMin: 0, endAfterMin: 0), .none)
+    }
+
+    /// Counted from when the phone paused; a running run, or a paused one
+    /// from a phone that doesn't say when, is never in one.
+    func testStateLongPause() {
+        var s = state(endsAt: nil, paused: 12)
+        XCTAssertEqual(s.longPause(at: now.addingTimeInterval(3600)), .none)
+        s.pausedAt = now
+        XCTAssertEqual(s.longPause(at: now.addingTimeInterval(11 * 60)), .prompt)
+        XCTAssertEqual(s.longPause(at: now.addingTimeInterval(31 * 60)), .end)
+        s.status = .left
+        XCTAssertEqual(s.longPause(at: now.addingTimeInterval(31 * 60)), .none)
+        var running = state(endsAt: now.addingTimeInterval(30))
+        running.pausedAt = now
+        XCTAssertEqual(running.longPause(at: now.addingTimeInterval(31 * 60)), .none)
+    }
+
+    /// ⏯ guessed on the wrist pauses from now, and resuming clears it.
+    func testTogglingSetsPausedAt() {
+        let paused = state(endsAt: now.addingTimeInterval(30)).applying(.toggle, at: now)
+        XCTAssertEqual(paused?.pausedAt, now)
+        XCTAssertNil(paused?.applying(.toggle, at: now)?.pausedAt)
+    }
+
+    /// A phone from before the long pause sends none of it: the defaults.
+    func testOldStateDecodesWithLongPauseDefaults() throws {
+        var s = state(endsAt: nil, paused: 12)
+        s.pausedAt = now
+        s.pausePromptMin = 5
+        XCTAssertEqual(WatchRunMessage.state(in: WatchRunMessage.encode(s))?.pausePromptMin, 5)
+        let data = try XCTUnwrap(WatchRunMessage.encode(s)[WatchRunMessage.stateKey] as? Data)
+        var json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        json.removeValue(forKey: "pausedAt")
+        json.removeValue(forKey: "pausePromptMin")
+        json.removeValue(forKey: "pauseEndMin")
+        let old = try JSONSerialization.data(withJSONObject: json)
+        let decoded = try XCTUnwrap(WatchRunMessage.state(in: [WatchRunMessage.stateKey: old]))
+        XCTAssertNil(decoded.pausedAt)
+        XCTAssertEqual(decoded.pausePromptMin, WatchWorkoutSettings.defaultPausePromptMin)
+        XCTAssertEqual(decoded.pauseEndMin, WatchWorkoutSettings.defaultPauseEndMin)
+    }
 }
