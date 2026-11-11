@@ -72,6 +72,13 @@ public nonisolated struct WatchRunState: Codable, Equatable, Sendable {
     /// What was left when it paused. nil while running.
     public var pausedRemainingSec: Int?
     public var isPaused: Bool { endsAt == nil }
+    /// When the run was paused. nil while running, and from a phone that
+    /// predates it.
+    public var pausedAt: Date?
+    /// The phone's long-pause settings, in minutes: when both ends ask
+    /// "Still training?", and when the watch ends its workout.
+    public var pausePromptMin: Int = WatchWorkoutSettings.defaultPausePromptMin
+    public var pauseEndMin: Int = WatchWorkoutSettings.defaultPauseEndMin
     /// Goes up each time a hold or rest begins — the same one again too — so
     /// a ⏮ restart is a change even though nothing else is.
     public var segment: Int
@@ -84,7 +91,10 @@ public nonisolated struct WatchRunState: Codable, Equatable, Sendable {
     public init(runID: String, status: Status, planName: String, exercise: String, side: String,
                 isResting: Bool, restLabel: String, sides: [Side] = [], next: String?, nextIsNewRound: Bool,
                 round: Int, rounds: Int, durationSec: Int, endsAt: Date?, pausedRemainingSec: Int?,
-                segment: Int, saveToHealth: Bool, sentAt: Date = .distantPast) {
+                segment: Int, saveToHealth: Bool, pausedAt: Date? = nil,
+                pausePromptMin: Int = WatchWorkoutSettings.defaultPausePromptMin,
+                pauseEndMin: Int = WatchWorkoutSettings.defaultPauseEndMin,
+                sentAt: Date = .distantPast) {
         self.runID = runID
         self.status = status
         self.planName = planName
@@ -102,10 +112,14 @@ public nonisolated struct WatchRunState: Codable, Equatable, Sendable {
         self.pausedRemainingSec = pausedRemainingSec
         self.segment = segment
         self.saveToHealth = saveToHealth
+        self.pausedAt = pausedAt
+        self.pausePromptMin = pausePromptMin
+        self.pauseEndMin = pauseEndMin
         self.sentAt = sentAt
     }
 
-    /// A state from a phone that predates `sides` decodes with none.
+    /// A state from a phone that predates `sides` decodes with none; one
+    /// that predates the long-pause fields, with the defaults.
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         runID = try c.decode(String.self, forKey: .runID)
@@ -125,7 +139,19 @@ public nonisolated struct WatchRunState: Codable, Equatable, Sendable {
         pausedRemainingSec = try c.decodeIfPresent(Int.self, forKey: .pausedRemainingSec)
         segment = try c.decode(Int.self, forKey: .segment)
         saveToHealth = try c.decode(Bool.self, forKey: .saveToHealth)
+        pausedAt = try c.decodeIfPresent(Date.self, forKey: .pausedAt)
+        pausePromptMin = try c.decodeIfPresent(Int.self, forKey: .pausePromptMin)
+            ?? WatchWorkoutSettings.defaultPausePromptMin
+        pauseEndMin = try c.decodeIfPresent(Int.self, forKey: .pauseEndMin)
+            ?? WatchWorkoutSettings.defaultPauseEndMin
         sentAt = try c.decode(Date.self, forKey: .sentAt)
+    }
+
+    /// How far into a long pause the run is at `date`.
+    public func longPause(at date: Date) -> LongPause {
+        guard status == .running, isPaused, let pausedAt else { return .none }
+        return LongPause.stage(pausedFor: date.timeIntervalSince(pausedAt),
+                               promptAfterMin: pausePromptMin, endAfterMin: pauseEndMin)
     }
 
     /// Whole seconds left at `date`, as the phone's clock would show them.
@@ -146,9 +172,11 @@ public nonisolated struct WatchRunState: Codable, Equatable, Sendable {
         if isPaused {
             next.endsAt = date.addingTimeInterval(TimeInterval(pausedRemainingSec ?? 0))
             next.pausedRemainingSec = nil
+            next.pausedAt = nil
         } else {
             next.pausedRemainingSec = remainingSec(at: date)
             next.endsAt = nil
+            next.pausedAt = date
         }
         next.sentAt = sentAt.addingTimeInterval(0.001)
         return next
@@ -253,9 +281,29 @@ public nonisolated struct WatchWorkoutNote: Equatable, Sendable {
     }
 }
 
-/// The phone's say on whether the watch keeps its workout in Health.
+/// A run left paused: after a while both ends ask "Still training?", and
+/// after longer the watch ends its workout, since a paused workout session
+/// keeps the heart rate sensor on. The run itself stays on the phone, ready
+/// to resume; resuming it starts a new watch workout.
+public nonisolated enum LongPause: Equatable, Sendable {
+    case none, prompt, end
+
+    /// 0 turns that stage off.
+    public static func stage(pausedFor: TimeInterval, promptAfterMin: Int, endAfterMin: Int) -> LongPause {
+        if endAfterMin > 0, pausedFor >= TimeInterval(endAfterMin) * 60 { return .end }
+        if promptAfterMin > 0, pausedFor >= TimeInterval(promptAfterMin) * 60 { return .prompt }
+        return .none
+    }
+}
+
+/// The phone's say on whether the watch keeps its workout in Health, and
+/// how long a pause runs before the long-pause prompt and workout end.
 public nonisolated enum WatchWorkoutSettings {
     public static let saveToHealthKey = "watchSaveWorkoutToHealth"
+    public static let pausePromptMinKey = "watchPausePromptMin"
+    public static let pauseEndMinKey = "watchPauseEndMin"
+    public static let defaultPausePromptMin = 10
+    public static let defaultPauseEndMin = 30
 
     /// On unless turned off.
     public static var saveToHealth: Bool {

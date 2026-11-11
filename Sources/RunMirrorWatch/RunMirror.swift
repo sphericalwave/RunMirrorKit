@@ -11,6 +11,12 @@
 //  begins, success when the run's done. All of them play wrist-down, since
 //  the workout session keeps the app running.
 //
+//  A paused workout session can keep the heart rate sensor on, so the
+//  workout doesn't outlive the run: a long pause asks "Still training?"
+//  and later ends it (`LongPause`), and while there's a workout the phone is
+//  asked after every so often — a phone with no run, or one not heard from
+//  for a good while, ends it here.
+//
 
 #if os(watchOS)
 import Foundation
@@ -21,6 +27,8 @@ import WatchKit
 @Observable
 public final class RunMirror {
     public private(set) var state: WatchRunState?
+    /// How far into a long pause the run is.
+    public private(set) var longPause: LongPause = .none
     public let phone = PhoneLink()
     public let workout: WatchWorkout
     public let brand: WatchRunBrand
@@ -40,10 +48,29 @@ public final class RunMirror {
     @ObservationIgnored private var askedAt: Date?
     static let askEvery: TimeInterval = 5
 
+    /// While there's a workout, the phone is asked for the run this often —
+    /// paused, it sends nothing on its own.
+    static let heartbeatEvery: TimeInterval = 30
+    /// A workout with no word from the phone for this long ends: the phone's
+    /// off, or the app was closed and can't be woken.
+    public static let phoneLostAfter: TimeInterval = 10 * 60
+    @ObservationIgnored private var watchdog: Task<Void, Never>?
+    @ObservationIgnored private var lastHeardAt = Date()
+    @ObservationIgnored private var heartbeatAt: Date?
+
     public init(brand: WatchRunBrand) {
         self.brand = brand
         workout = WatchWorkout(brand: brand)
-        phone.onState = { [weak self] in self?.apply($0) }
+        phone.onState = { [weak self] in
+            self?.lastHeardAt = Date()
+            self?.apply($0)
+        }
+        // Closed and reopened, the phone has no run: nor should the wrist.
+        phone.onNoRun = { [weak self] in
+            guard let self else { return }
+            lastHeardAt = Date()
+            if workout.isActive || state != nil { endOnWatch() }
+        }
         workout.onHeartRate = { [weak self] in self?.phone.send(heartRate: $0) }
         workout.onNotSaved = { [weak self] in self?.phone.send($0) }
         // The guess on the wrist may be wrong: whatever the phone has, as soon as it can say.
@@ -52,6 +79,7 @@ public final class RunMirror {
 
     public func activate() {
         phone.activate()
+        startWatchdog()
         Task {
             await workout.requestAuthorization()
             // A run that arrived while Health was asking.
@@ -103,6 +131,7 @@ public final class RunMirror {
         UserDefaults.standard.set(new.saveToHealth, forKey: WatchWorkoutSettings.saveToHealthKey)
         cue(from: old, to: new)
         syncWorkout(new)
+        checkLongPause(at: Date())
         if new.status == .running, !new.isPaused { startTicking() } else { stopTicking() }
     }
 
@@ -136,6 +165,45 @@ public final class RunMirror {
             // One well under way is the app catching up, not a start.
             guard endsAt.timeIntervalSinceNow > Double(new.durationSec) - 3 else { return }
             play(new.isResting ? .stop : .start)
+        }
+    }
+
+    private func startWatchdog() {
+        guard watchdog == nil else { return }
+        watchdog = Task { [weak self] in
+            while !Task.isCancelled {
+                self?.watch(at: Date())
+                try? await Task.sleep(for: .seconds(5))
+            }
+        }
+    }
+
+    private func watch(at date: Date) {
+        checkLongPause(at: date)
+        guard workout.isActive else {
+            // The phone's silence counts from when there's a workout.
+            lastHeardAt = date
+            return
+        }
+        if date.timeIntervalSince(lastHeardAt) > Self.phoneLostAfter {
+            endOnWatch()
+            return
+        }
+        if let heartbeatAt, date.timeIntervalSince(heartbeatAt) < Self.heartbeatEvery { return }
+        heartbeatAt = date
+        phone.requestState()
+    }
+
+    /// Paused a while: ask once, with a tap; paused longer: end the workout,
+    /// leaving the run paused on the phone.
+    private func checkLongPause(at date: Date) {
+        let stage = state?.longPause(at: date) ?? .none
+        guard stage != longPause else { return }
+        longPause = stage
+        switch stage {
+        case .prompt: play(.notification)
+        case .end: if let state, workout.isActive { workout.end(save: state.saveToHealth) }
+        case .none: break
         }
     }
 

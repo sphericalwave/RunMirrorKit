@@ -5,7 +5,8 @@
 //  The hold or rest in progress, glanced at mid-hold: what it is, which
 //  side and which are done, a big countdown, the round, and ⏮ ⏯ ⏭ as large as the screen
 //  allows. ⏮ once starts the hold over, twice goes back one; ⏭ goes on —
-//  the phone's own buttons, run on the phone.
+//  the phone's own buttons, run on the phone. Paused long enough, it asks
+//  "Still training?" instead (`LongPause`).
 //
 
 #if os(watchOS)
@@ -22,6 +23,44 @@ public struct RunView: View {
     }
 
     public var body: some View {
+        if mirror.longPause == .none {
+            clockView
+        } else {
+            stillTraining
+        }
+    }
+
+    /// Resume or End, the phone's own; End needs no second ask, this is one.
+    private var stillTraining: some View {
+        ScrollView {
+            VStack(spacing: 8) {
+                Text("Still training?")
+                    .font(.headline)
+                Text(mirror.longPause == .end
+                     ? "Workout ended on the watch to save battery. Resume starts a new one."
+                     : "The workout has been paused a while.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                Button {
+                    mirror.send(.toggle)
+                } label: {
+                    Label("Resume", systemImage: "play.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                Button(role: .destructive) {
+                    mirror.send(.end)
+                } label: {
+                    Text("End Workout")
+                        .frame(maxWidth: .infinity)
+                }
+            }
+            .disabled(!mirror.phone.isReachable)
+        }
+    }
+
+    private var clockView: some View {
         VStack(spacing: 2) {
             heading
             TimelineView(.periodic(from: .now, by: 0.5)) { context in

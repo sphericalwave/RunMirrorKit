@@ -43,6 +43,10 @@ public final class PhoneLink: NSObject {
         session.activate()
     }
 
+    /// The phone answered a request for the run with none: closed and
+    /// reopened, say, so the run the watch has is gone.
+    @ObservationIgnored public var onNoRun: (() -> Void)?
+
     /// Called when a command's messages all failed and it was left as
     /// application context — the run on the wrist may not be the phone's.
     @ObservationIgnored public var onCommandUndelivered: (() -> Void)?
@@ -118,13 +122,15 @@ public final class PhoneLink: NSObject {
     /// `onState`. For when a state the phone sent didn't arrive — application
     /// context can wait on the system, and a message can be dropped — so the
     /// watch would otherwise sit on a run that's moved on. A phone with no run,
-    /// or one too old to answer, replies with nothing.
+    /// or one too old to answer, replies with nothing (`onNoRun`).
     public func requestState() {
         let session = WCSession.default
         guard session.activationState == .activated, session.isReachable else { return }
         session.sendMessage(WatchRunMessage.encodeStateRequest(), replyHandler: { reply in
-            guard let state = WatchRunMessage.state(in: reply) else { return }
-            Task { @MainActor in self.onState?(state) }
+            let state = WatchRunMessage.state(in: reply)
+            Task { @MainActor in
+                if let state { self.onState?(state) } else { self.onNoRun?() }
+            }
         }, errorHandler: nil)
     }
 
