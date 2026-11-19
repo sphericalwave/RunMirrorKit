@@ -29,7 +29,11 @@ public struct RunRootView: View {
                 case .running:
                     TabView(selection: $page) {
                         EndPage(mirror: mirror).tag(0)
-                        RunView(mirror: mirror, state: state).tag(1)
+                        if let request = state.log {
+                            LogPage(mirror: mirror, request: request).tag(1)
+                        } else {
+                            RunView(mirror: mirror, state: state).tag(1)
+                        }
                     }
                     .tabViewStyle(.page)
                 case .finished:
@@ -48,6 +52,7 @@ public struct RunRootView: View {
         }
         .onChange(of: mirror.state?.runID) { page = 1 }
         .onChange(of: mirror.state?.status) { page = 1 }
+        .onChange(of: mirror.state?.log?.id) { page = 1 }
     }
 
     /// `note`: why the workout just ended wasn't kept in Health.

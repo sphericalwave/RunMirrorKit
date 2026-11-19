@@ -87,6 +87,10 @@ public nonisolated struct WatchRunState: Codable, Equatable, Sendable {
     /// Stamped as it's sent, so the watch can drop one that arrives after a
     /// newer one — a message and the application context can cross.
     public var sentAt: Date = .distantPast
+    /// A rated set just ended and the run is waiting for it to be logged —
+    /// reps, technique / effort / discomfort, and whether the next round goes
+    /// up a level. nil otherwise, and from a phone that predates rated runs.
+    public var log: WatchSetLogRequest? = nil
 
     public init(runID: String, status: Status, planName: String, exercise: String, side: String,
                 isResting: Bool, restLabel: String, sides: [Side] = [], next: String?, nextIsNewRound: Bool,
@@ -94,7 +98,7 @@ public nonisolated struct WatchRunState: Codable, Equatable, Sendable {
                 segment: Int, saveToHealth: Bool, pausedAt: Date? = nil,
                 pausePromptMin: Int = WatchWorkoutSettings.defaultPausePromptMin,
                 pauseEndMin: Int = WatchWorkoutSettings.defaultPauseEndMin,
-                sentAt: Date = .distantPast) {
+                sentAt: Date = .distantPast, log: WatchSetLogRequest? = nil) {
         self.runID = runID
         self.status = status
         self.planName = planName
@@ -116,6 +120,7 @@ public nonisolated struct WatchRunState: Codable, Equatable, Sendable {
         self.pausePromptMin = pausePromptMin
         self.pauseEndMin = pauseEndMin
         self.sentAt = sentAt
+        self.log = log
     }
 
     /// A state from a phone that predates `sides` decodes with none; one
@@ -145,6 +150,7 @@ public nonisolated struct WatchRunState: Codable, Equatable, Sendable {
         pauseEndMin = try c.decodeIfPresent(Int.self, forKey: .pauseEndMin)
             ?? WatchWorkoutSettings.defaultPauseEndMin
         sentAt = try c.decode(Date.self, forKey: .sentAt)
+        log = try c.decodeIfPresent(WatchSetLogRequest.self, forKey: .log)
     }
 
     /// How far into a long pause the run is at `date`.
@@ -187,6 +193,61 @@ public nonisolated enum WatchRunCommand: String, Codable, Sendable {
     case back, toggle, forward, end
 }
 
+/// Where a rated set leaves the exercise for the next round.
+public nonisolated enum WatchSetDecision: String, Codable, Sendable, CaseIterable {
+    case regress, `repeat`, progress
+}
+
+/// What the phone asks for once a rated set ends, with its best guesses to
+/// start from: the last reps and ratings, and the suggested next step.
+public nonisolated struct WatchSetLogRequest: Codable, Equatable, Sendable {
+    /// One per set: what a `WatchSetLog` answers, so a late answer to an
+    /// earlier set can't land on this one.
+    public var id: String
+    public var exercise: String
+    public var reps: Int
+    public var rpt: Int
+    public var rpe: Int
+    public var rpd: Int
+    public var suggestion: WatchSetDecision
+    /// The exercise a step would go to; nil at the top or bottom of the ladder.
+    public var progressTo: String?
+    public var regressTo: String?
+
+    public init(id: String, exercise: String, reps: Int, rpt: Int, rpe: Int, rpd: Int,
+                suggestion: WatchSetDecision, progressTo: String?, regressTo: String?) {
+        self.id = id
+        self.exercise = exercise
+        self.reps = reps
+        self.rpt = rpt
+        self.rpe = rpe
+        self.rpd = rpd
+        self.suggestion = suggestion
+        self.progressTo = progressTo
+        self.regressTo = regressTo
+    }
+}
+
+/// A rated set logged on the watch.
+public nonisolated struct WatchSetLog: Codable, Equatable, Sendable {
+    /// The `WatchSetLogRequest.id` it answers.
+    public var requestID: String
+    public var reps: Int
+    public var rpt: Int
+    public var rpe: Int
+    public var rpd: Int
+    public var decision: WatchSetDecision
+
+    public init(requestID: String, reps: Int, rpt: Int, rpe: Int, rpd: Int, decision: WatchSetDecision) {
+        self.requestID = requestID
+        self.reps = reps
+        self.rpt = rpt
+        self.rpe = rpe
+        self.rpd = rpd
+        self.decision = decision
+    }
+}
+
 /// The dictionaries WatchConnectivity carries.
 public nonisolated enum WatchRunMessage {
     public static let stateKey = "runState"
@@ -195,6 +256,7 @@ public nonisolated enum WatchRunMessage {
     public static let workoutNoteKey = "workoutNote"
     public static let noteRunIDKey = "noteRunID"
     public static let stateRequestKey = "runStateRequest"
+    public static let setLogKey = "runSetLog"
     public static let commandIDKey = "runCommandID"
     public static let commandSentAtKey = "runCommandSentAt"
     /// A command that came the slow way — application context, after its
@@ -227,6 +289,18 @@ public nonisolated enum WatchRunMessage {
 
     public static func commandSentAt(in message: [String: Any]) -> Date? {
         (message[commandSentAtKey] as? TimeInterval).map(Date.init(timeIntervalSince1970:))
+    }
+
+    /// Sent like a command — tried again, `id` the same each time — and
+    /// answered with the run as the log leaves it.
+    public static func encode(_ log: WatchSetLog, id: String, sentAt: Date) -> [String: Any] {
+        guard let data = try? JSONEncoder().encode(log) else { return [:] }
+        return [setLogKey: data, commandIDKey: id, commandSentAtKey: sentAt.timeIntervalSince1970]
+    }
+
+    public static func setLog(in message: [String: Any]) -> WatchSetLog? {
+        guard let data = message[setLogKey] as? Data else { return nil }
+        return try? JSONDecoder().decode(WatchSetLog.self, from: data)
     }
 
     public static func command(in message: [String: Any]) -> WatchRunCommand? {
@@ -267,6 +341,7 @@ public nonisolated enum WatchRunMessage {
     public static func isRunMessage(_ message: [String: Any]) -> Bool {
         message[stateKey] != nil || message[commandKey] != nil || message[heartRateKey] != nil
             || message[workoutNoteKey] != nil || message[stateRequestKey] != nil
+            || message[setLogKey] != nil
     }
 }
 

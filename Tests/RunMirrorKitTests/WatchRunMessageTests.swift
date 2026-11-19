@@ -190,4 +190,41 @@ final class WatchRunMessageTests: XCTestCase {
         XCTAssertEqual(decoded.pausePromptMin, WatchWorkoutSettings.defaultPausePromptMin)
         XCTAssertEqual(decoded.pauseEndMin, WatchWorkoutSettings.defaultPauseEndMin)
     }
+
+    // MARK: - Rated sets
+
+    private let request = WatchSetLogRequest(id: "set-1", exercise: "shinbox twist", reps: 6, rpt: 8, rpe: 6,
+                                             rpd: 2, suggestion: .progress, progressTo: "table lift",
+                                             regressTo: nil)
+
+    /// A run waiting for a set to be logged carries what to log, and survives
+    /// the trip.
+    func testStateWithLogRequestRoundTrips() {
+        var s = state(endsAt: nil, paused: 0)
+        s.log = request
+        XCTAssertEqual(WatchRunMessage.state(in: WatchRunMessage.encode(s))?.log, request)
+    }
+
+    /// A phone that predates rated runs sends no log, and that's no log.
+    func testStateWithoutLogDecodesNil() throws {
+        let s = state(endsAt: now)
+        var json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(s)) as! [String: Any]
+        json.removeValue(forKey: "log")
+        let decoded = try JSONDecoder().decode(WatchRunState.self,
+                                               from: JSONSerialization.data(withJSONObject: json))
+        XCTAssertNil(decoded.log)
+    }
+
+    /// A set logged on the watch goes like a command: an id and when it was
+    /// sent, so a retry is acted on once and a stale one not at all.
+    func testSetLogRoundTripsWithIDAndSentAt() {
+        let log = WatchSetLog(requestID: "set-1", reps: 7, rpt: 9, rpe: 7, rpd: 1, decision: .progress)
+        let message = WatchRunMessage.encode(log, id: "press-1", sentAt: now)
+        XCTAssertEqual(WatchRunMessage.setLog(in: message), log)
+        XCTAssertEqual(WatchRunMessage.commandID(in: message), "press-1")
+        XCTAssertEqual(WatchRunMessage.commandSentAt(in: message), now)
+        XCTAssertTrue(WatchRunMessage.isRunMessage(message))
+        XCTAssertNil(WatchRunMessage.command(in: message))
+        XCTAssertNil(WatchRunMessage.setLog(in: WatchRunMessage.encode(.toggle)))
+    }
 }
