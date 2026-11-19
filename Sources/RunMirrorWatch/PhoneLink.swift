@@ -60,6 +60,12 @@ public final class PhoneLink: NSObject {
         send(command: message, try: 1)
     }
 
+    /// A rated set, logged on the wrist: sent like a command.
+    public func send(_ log: WatchSetLog) {
+        let message = WatchRunMessage.encode(log, id: UUID().uuidString, sentAt: Date())
+        send(command: message, try: 1)
+    }
+
     private func send(command message: [String: Any], try attempt: Int) {
         let session = WCSession.default
         guard session.activationState == .activated else {

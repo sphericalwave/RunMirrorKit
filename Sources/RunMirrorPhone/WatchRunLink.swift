@@ -51,6 +51,9 @@ public final class WatchRunLink: NSObject {
     /// returns, so the reply can carry it.
     @ObservationIgnored public var onCommand: ((WatchRunCommand) -> Void)?
     @ObservationIgnored public var onHeartRate: ((Int) -> Void)?
+    /// A rated set logged on the watch. Like `onCommand`, expected to
+    /// `publish` the run as it leaves it before returning.
+    @ObservationIgnored public var onSetLog: ((WatchSetLog) -> Void)?
 
     /// The last state sent, and the same before it was stamped — what the
     /// next one is compared with.
@@ -149,10 +152,21 @@ public final class WatchRunLink: NSObject {
         onCommand?(command)
     }
 
+    /// Once per id, like a command.
+    private func perform(_ log: WatchSetLog, id: String?) {
+        if let id {
+            guard !handledCommandIDs.contains(id) else { return }
+            handledCommandIDs.append(id)
+            if handledCommandIDs.count > 32 { handledCommandIDs.removeFirst() }
+        }
+        onSetLog?(log)
+    }
+
     private func handle(command: WatchRunCommand?, id: String? = nil, heartRate bpm: Int?,
-                        note: WatchWorkoutNote? = nil) {
+                        note: WatchWorkoutNote? = nil, setLog: WatchSetLog? = nil) {
         if let note { workoutNote = note }
         if let command { perform(command, id: id) }
+        if let setLog { perform(setLog, id: id) }
         if let bpm {
             heartRate = bpm
             heartRateAt = Date()
@@ -188,20 +202,23 @@ extension WatchRunLink: WCSessionDelegate {
         let id = WatchRunMessage.commandID(in: message)
         let bpm = WatchRunMessage.heartRate(in: message)
         let note = WatchRunMessage.workoutNote(in: message)
-        Task { @MainActor in self.handle(command: command, id: id, heartRate: bpm, note: note) }
+        let setLog = WatchRunMessage.setLog(in: message)
+        Task { @MainActor in self.handle(command: command, id: id, heartRate: bpm, note: note, setLog: setLog) }
     }
 
     /// A command the watch couldn't get through as a message — acted on only
     /// if it's still news.
     public nonisolated func session(_ session: WCSession, didReceiveApplicationContext context: [String: Any]) {
-        guard let command = WatchRunMessage.command(in: context) else {
+        let command = WatchRunMessage.command(in: context)
+        let setLog = WatchRunMessage.setLog(in: context)
+        guard command != nil || setLog != nil else {
             Task { @MainActor in self.other?.session?(session, didReceiveApplicationContext: context) }
             return
         }
         guard let sentAt = WatchRunMessage.commandSentAt(in: context),
               Date().timeIntervalSince(sentAt) < WatchRunMessage.commandFreshFor else { return }
         let id = WatchRunMessage.commandID(in: context)
-        Task { @MainActor in self.handle(command: command, id: id, heartRate: nil) }
+        Task { @MainActor in self.handle(command: command, id: id, heartRate: nil, setLog: setLog) }
     }
 
     /// A note the watch queued while the phone was out of reach.
@@ -234,14 +251,15 @@ extension WatchRunLink: WCSessionDelegate {
         let command = WatchRunMessage.command(in: message)
         let id = WatchRunMessage.commandID(in: message)
         let bpm = WatchRunMessage.heartRate(in: message)
-        guard command != nil else {
+        let setLog = WatchRunMessage.setLog(in: message)
+        guard command != nil || setLog != nil else {
             replyHandler([:])
             Task { @MainActor in self.handle(command: nil, heartRate: bpm) }
             return
         }
         // Acted on now, and answered with the run as it's left.
         Task { @MainActor in
-            self.handle(command: command, id: id, heartRate: bpm)
+            self.handle(command: command, id: id, heartRate: bpm, setLog: setLog)
             replyHandler(self.last.map(WatchRunMessage.encode) ?? [:])
         }
     }

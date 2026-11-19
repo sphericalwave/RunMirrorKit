@@ -20,6 +20,7 @@ public final class WatchRunLink {
     public private(set) var workoutNote: WatchWorkoutNote?
     @ObservationIgnored public var onCommand: ((WatchRunCommand) -> Void)?
     @ObservationIgnored public var onHeartRate: ((Int) -> Void)?
+    @ObservationIgnored public var onSetLog: ((WatchSetLog) -> Void)?
 
     private init() {}
 

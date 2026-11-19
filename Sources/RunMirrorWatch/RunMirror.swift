@@ -102,6 +102,18 @@ public final class RunMirror {
         phone.send(command)
     }
 
+    /// A rated set logged on the wrist. The log page goes at once; the
+    /// phone's answer, with the next set, follows in the reply.
+    public func log(_ entry: WatchSetLog) {
+        WKInterfaceDevice.current().play(.success)
+        if var guess = state, guess.log?.id == entry.requestID {
+            guess.log = nil
+            guess.sentAt = guess.sentAt.addingTimeInterval(0.001)
+            apply(guess)
+        }
+        phone.send(entry)
+    }
+
     /// Phone out of reach: the workout on the wrist ends here, the run on the
     /// phone carries on untouched.
     public func endOnWatch() {
